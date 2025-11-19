@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { verifyToken } from '@/lib/auth'
+import { enviarWhatsApp } from '@/lib/whatsapp'
 import { z } from 'zod'
 import crypto from 'crypto'
 
@@ -98,8 +99,8 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // TODO: Trigger WhatsApp notification (Sprint 3)
-    // await enviarWhatsApp(correspondencia.id)
+    // Trigger WhatsApp notification (async, don't block response)
+    enviarWhatsApp(correspondencia.id).catch(console.error)
 
     return NextResponse.json({ success: true, correspondencia }, { status: 201 })
   } catch (error) {
