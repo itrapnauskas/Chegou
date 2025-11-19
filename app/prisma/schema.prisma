@@ -1,0 +1,166 @@
+// This is your Prisma schema file
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// MODELOS PRINCIPAIS - CHEGOU MVP
+// ============================================
+
+/// Condomínio (Multi-tenant)
+model Condominio {
+  id        String   @id @default(cuid())
+  nome      String
+  endereco  String?
+  ativo     Boolean  @default(true)
+
+  // Configurações
+  config    Json?    @default("{}")
+
+  // Timestamps
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  // Relações
+  usuarios         Usuario[]
+  moradores        Morador[]
+  correspondencias Correspondencia[]
+
+  @@map("condominios")
+}
+
+/// Usuários (Zelador, Síndico, Admin)
+model Usuario {
+  id    String @id @default(cuid())
+  email String @unique
+  senha String // bcrypt hash
+  nome  String
+  role  Role   @default(ZELADOR)
+  ativo Boolean @default(true)
+
+  // Multi-tenant
+  condominioId String
+  condominio   Condominio @relation(fields: [condominioId], references: [id], onDelete: Cascade)
+
+  // Timestamps
+  criadoEm      DateTime  @default(now())
+  atualizadoEm  DateTime  @updatedAt
+  ultimoLoginEm DateTime?
+
+  // Relações
+  correspondenciasRegistradas Correspondencia[] @relation("RegistradoPor")
+
+  @@index([condominioId])
+  @@index([email])
+  @@map("usuarios")
+}
+
+enum Role {
+  ADMIN   // Administradora (acesso todos condomínios)
+  SINDICO // Síndico (acesso seu condomínio, manage users)
+  ZELADOR // Zelador (acesso seu condomínio, registrar corresp)
+}
+
+/// Moradores
+model Morador {
+  id          String  @id @default(cuid())
+  nome        String
+  apartamento String
+  telefone    String // +5511999999999 (WhatsApp)
+  telefone2   String? // Telefone alternativo
+  email       String?
+  ativo       Boolean @default(true)
+
+  // Multi-tenant
+  condominioId String
+  condominio   Condominio @relation(fields: [condominioId], references: [id], onDelete: Cascade)
+
+  // Timestamps
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  // Relações
+  correspondencias Correspondencia[]
+
+  @@unique([condominioId, apartamento])
+  @@index([condominioId])
+  @@index([telefone])
+  @@index([apartamento])
+  @@map("moradores")
+}
+
+/// Correspondências
+model Correspondencia {
+  id       String @id @default(cuid())
+  fotoUrl  String
+  fotoHash String @unique
+
+  // Status
+  status StatusCorrespondencia @default(PENDENTE)
+
+  // Morador
+  moradorId String
+  morador   Morador @relation(fields: [moradorId], references: [id], onDelete: Cascade)
+
+  // Multi-tenant
+  condominioId String
+  condominio   Condominio @relation(fields: [condominioId], references: [id], onDelete: Cascade)
+
+  // Registrado por
+  registradoPorId String
+  registradoPor   Usuario @relation("RegistradoPor", fields: [registradoPorId], references: [id])
+
+  // Notificação
+  notificadoEm      DateTime?
+  notificacaoStatus NotificacaoStatus @default(PENDENTE)
+  notificacaoErro   String?
+
+  // Retirada
+  retiradoEm DateTime?
+
+  // Timestamps
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  @@index([condominioId])
+  @@index([moradorId])
+  @@index([status])
+  @@index([criadoEm])
+  @@index([fotoHash])
+  @@map("correspondencias")
+}
+
+enum StatusCorrespondencia {
+  PENDENTE
+  RETIRADA
+}
+
+enum NotificacaoStatus {
+  PENDENTE
+  ENVIADA
+  FALHOU
+  RETRY
+}
+
+/// Log de Notificações
+model LogNotificacao {
+  id                String            @id @default(cuid())
+  correspondenciaId String
+  telefone          String
+  mensagem          String            @db.Text
+  status            NotificacaoStatus
+  erro              String?           @db.Text
+  tentativas        Int               @default(1)
+  criadoEm          DateTime          @default(now())
+
+  @@index([correspondenciaId])
+  @@index([criadoEm])
+  @@map("logs_notificacoes")
+}

@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: chegou-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chegou
+      POSTGRES_PASSWORD: chegou123
+      POSTGRES_DB: chegou_dev
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U chegou']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # pgAdmin (Database GUI - Optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: chegou-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@chegou.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - '5050:80'
+    depends_on:
+      - postgres
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  default:
+    name: chegou-network
