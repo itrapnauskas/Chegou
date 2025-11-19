@@ -26,6 +26,12 @@ yarn-error.log*
 .env.production.local
 .env.production
 
+# Allow example files
+!.env.example
+!.env.local.example
+!**/.env.example
+!**/.env.local.example
+
 # IDE
 .vscode/
 .idea/
