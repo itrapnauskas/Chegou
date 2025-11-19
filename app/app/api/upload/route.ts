@@ -1,13 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { createClient } from '@supabase/supabase-js'
+import { writeFile, mkdir } from 'fs/promises'
+import path from 'path'
+import crypto from 'crypto'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+// Storage configuration
+const STORAGE_TYPE = process.env.STORAGE_TYPE || 'local'
 
-// POST /api/upload - Upload foto to Supabase Storage
+// Supabase client (only used if STORAGE_TYPE is 'cloud')
+const supabase = process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+  ? createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+  : null
+
+// POST /api/upload - Upload foto
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization')
@@ -26,7 +35,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file type
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/heic']
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/heic', 'image/jpg']
     if (!allowedTypes.includes(file.type)) {
       return NextResponse.json(
         { error: 'Tipo de arquivo inválido. Apenas JPG, PNG, HEIC.' },
@@ -45,44 +54,79 @@ export async function POST(request: NextRequest) {
 
     // Generate unique filename
     const timestamp = Date.now()
-    const random = Math.random().toString(36).substring(7)
-    const ext = file.name.split('.').pop()
+    const random = crypto.randomBytes(8).toString('hex')
+    const ext = file.name.split('.').pop() || 'jpg'
     const filename = `${timestamp}-${random}.${ext}`
 
     // Upload path: condominios/{condominioId}/correspondencias/YYYY/MM/filename
     const now = new Date()
     const year = now.getFullYear()
     const month = String(now.getMonth() + 1).padStart(2, '0')
-    const path = `condominios/${user.condominioId}/correspondencias/${year}/${month}/${filename}`
+    const relativePath = `condominios/${user.condominioId}/correspondencias/${year}/${month}`
+    const fullPath = `${relativePath}/${filename}`
 
-    // Convert File to ArrayBuffer
+    // Convert File to Buffer
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
 
-    // Upload to Supabase Storage
-    const { data, error } = await supabase.storage
-      .from('correspondencias')
-      .upload(path, buffer, {
-        contentType: file.type,
-        cacheControl: '31536000', // 1 year
-        upsert: false,
-      })
+    // ====================
+    // LOCAL STORAGE
+    // ====================
+    if (STORAGE_TYPE === 'local') {
+      const uploadDir = path.join(process.cwd(), 'public', 'uploads', relativePath)
+      const filePath = path.join(uploadDir, filename)
 
-    if (error) {
-      console.error('Supabase upload error:', error)
-      return NextResponse.json({ error: 'Erro ao fazer upload' }, { status: 500 })
+      // Create directory if doesn't exist
+      await mkdir(uploadDir, { recursive: true })
+
+      // Write file
+      await writeFile(filePath, buffer)
+
+      // Generate public URL
+      const publicUrl = `/uploads/${fullPath}`
+
+      return NextResponse.json({
+        success: true,
+        fotoUrl: publicUrl,
+        path: fullPath,
+      })
     }
 
-    // Get public URL
-    const { data: { publicUrl } } = supabase.storage
-      .from('correspondencias')
-      .getPublicUrl(path)
+    // ====================
+    // SUPABASE STORAGE (Cloud)
+    // ====================
+    if (STORAGE_TYPE === 'cloud' && supabase) {
+      const { data, error } = await supabase.storage
+        .from('correspondencias')
+        .upload(fullPath, buffer, {
+          contentType: file.type,
+          cacheControl: '31536000', // 1 year
+          upsert: false,
+        })
 
-    return NextResponse.json({
-      success: true,
-      url: publicUrl,
-      path: data.path,
-    })
+      if (error) {
+        console.error('Supabase upload error:', error)
+        return NextResponse.json({ error: 'Erro ao fazer upload' }, { status: 500 })
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('correspondencias')
+        .getPublicUrl(fullPath)
+
+      return NextResponse.json({
+        success: true,
+        fotoUrl: publicUrl,
+        path: data.path,
+      })
+    }
+
+    // No valid storage configured
+    return NextResponse.json(
+      { error: 'Storage não configurado corretamente' },
+      { status: 500 }
+    )
+
   } catch (error) {
     console.error('Upload error:', error)
     return NextResponse.json({ error: 'Erro ao fazer upload' }, { status: 500 })
